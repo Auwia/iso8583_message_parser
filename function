@@ -1,0 +1,62 @@
+
+CREATE OR REPLACE FUNCTION parse_iso8583_fn(p_raw_msg IN RAW, p_len IN INTEGER) RETURN VARCHAR2 IS
+  v_cursor     INTEGER := 1;
+  v_raw        RAW(7104);
+  v_mti        VARCHAR2(10);
+  v_bitmap     VARCHAR2(32);
+  v_bin        VARCHAR2(256);
+  v_result     VARCHAR2(4000) := '';
+
+  -- === Utility Functions ===
+  FUNCTION extract_bytes(p_raw RAW, p_start IN OUT INTEGER, p_len INTEGER) RETURN RAW IS
+    v_part RAW(2000);
+  BEGIN
+    v_part := SUBSTR(p_raw, p_start, p_len);
+    p_start := p_start + p_len;
+    RETURN v_part;
+  END;
+
+  FUNCTION raw_to_hex(p_raw RAW) RETURN VARCHAR2 IS
+  BEGIN
+    RETURN RAWTOHEX(p_raw);
+  END;
+
+  FUNCTION hex_to_bin(p_hex VARCHAR2) RETURN VARCHAR2 IS
+    v_result VARCHAR2(512);
+  BEGIN
+    FOR i IN 1 .. LENGTH(p_hex) LOOP
+      v_result := v_result || LPAD(TO_CHAR(TO_NUMBER(SUBSTR(p_hex, i, 1), 'X')), 4, '0');
+    END LOOP;
+    RETURN v_result;
+  END;
+
+BEGIN
+  -- Use only the specified length from input
+  v_raw := SUBSTR(p_raw_msg, 1, p_len);
+
+  -- Read MTI
+  v_mti := raw_to_hex(extract_bytes(v_raw, v_cursor, 2));
+  v_result := v_result || 'MTI=' || v_mti || CHR(10);
+
+  -- Read bitmap
+  v_bitmap := raw_to_hex(extract_bytes(v_raw, v_cursor, 8));
+  v_result := v_result || 'BITMAP HEX=' || v_bitmap || CHR(10);
+
+  -- Second bitmap?
+  IF SUBSTR(v_bitmap, 1, 1) IN ('8','9','A','B','C','D','E','F') THEN
+    v_bitmap := v_bitmap || raw_to_hex(extract_bytes(v_raw, v_cursor, 8));
+    v_result := v_result || 'Second bitmap appended.' || CHR(10);
+  END IF;
+
+  -- Convert bitmap to binary
+  v_bin := hex_to_bin(v_bitmap);
+  v_result := v_result || 'Bitmap BIN=' || v_bin || CHR(10);
+  v_result := v_result || 'Lunghezza campi: ' || LENGTH(v_bin) || CHR(10);
+
+  RETURN v_result;
+
+EXCEPTION
+  WHEN OTHERS THEN
+    RETURN 'Errore: ' || SQLERRM;
+END;
+/
